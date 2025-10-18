@@ -4,48 +4,97 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Image Gallery</title>
-  <link rel="stylesheet" href="https://unpkg.com/photoswipe@5/dist/photoswipe.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <header>
-    <h1>Image Gallery</h1>
-    <div class="directory-browser">
-      <label>Directory:</label>
-      <input type="text" id="dirPath" placeholder="Enter directory path..." />
-      <button id="browseBtn" class="btn">Browse</button>
-      <button id="loadBtn" class="btn">Load</button>
+  <!-- Header/Topbar -->
+  <header class="topbar">
+    <div class="topbar-section">
+      <h1>Image Gallery</h1>
     </div>
-    <div class="controls">
-      <button id="play" class="btn">Play</button>
-      <div class="interval-control">
-        <label for="interval">Interval:</label>
-        <input type="range" id="interval" min="1" max="10" step="0.5" value="3">
-        <span id="intervalLabel">3.0s</span>
-      </div>
-      <div class="fit-control">
-        <label for="fitMode">Fit:</label>
-        <select id="fitMode" class="fit-select">
-          <option value="contain">Auto</option>
-          <option value="height" selected>Height</option>
-          <option value="width">Width</option>
-        </select>
-      </div>
+    
+    <div class="topbar-section">
+      <input type="text" id="dirPathInput" class="dir-input" placeholder="Directory path...">
+      <button id="browseBtn" class="btn btn-primary">Browse</button>
+      <button id="loadBtn" class="btn btn-primary">Load Images</button>
+    </div>
+    
+    <div class="topbar-section">
+      <label>Slideshow:</label>
+      <button id="pausePlayBtn" class="btn">⏸ Pause</button>
+      <button id="speedDecBtn" class="btn btn-small">−</button>
+      <input type="range" id="speedSlider" min="1" max="25" value="2" class="speed-slider">
+      <button id="speedIncBtn" class="btn btn-small">+</button>
+      <span id="speedDisplay" class="speed-display">2s</span>
     </div>
   </header>
 
-  <main>
-    <div id="grid" class="grid"></div>
-  </main>
-
-  <div id="dirModal" class="modal" style="display:none">
-    <div class="modal-content">
-      <h2 id="modalTitle">Select Directory</h2>
-      <div id="dirList" class="dir-list"></div>
-      <button id="closeModal" class="btn">Close</button>
+  <!-- Selection Controls -->
+  <div class="controls-bar">
+    <div class="controls-group">
+      <button id="selectAllBtn" class="btn">Select All</button>
+      <button id="deselectAllBtn" class="btn">Deselect All</button>
+      <button id="selectRowBtn" class="btn">Select Row</button>
+      <button id="selectColumnBtn" class="btn">Select Column</button>
+      <button id="deleteSelectedBtn" class="btn btn-danger">Delete Selected</button>
+    </div>
+    <div class="info">
+      <span id="imageCount">No images loaded</span>
     </div>
   </div>
 
-  <script type="module" src="app.js?v=12"></script>
+  <!-- Gallery Grid -->
+  <div id="gallery" class="gallery-grid">
+    <!-- Images will be dynamically inserted here -->
+  </div>
+
+  <!-- Directory Browser Modal -->
+  <div id="browserModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Browse Directory</h2>
+        <button id="modalCloseBtn" class="btn-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="browser-path">
+          <strong>Current:</strong> <span id="browserCurrentPath">/</span>
+          <button id="browserUpBtn" class="btn btn-small">↑ Up</button>
+        </div>
+        <div id="browserDirList" class="dir-list">
+          <!-- Directories will be listed here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="browserUseBtn" class="btn btn-primary">Use This Directory</button>
+        <button id="browserCancelBtn" class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slideshow Overlay -->
+  <div id="slideshowOverlay" class="slideshow-overlay">
+    <button id="slideshowExitBtn" class="slideshow-exit">×</button>
+    
+    <div class="slideshow-content">
+      <button id="slideshowPrevBtn" class="slideshow-nav slideshow-prev">‹</button>
+      <img id="slideshowImage" class="slideshow-image" alt="Slideshow image">
+      <button id="slideshowNextBtn" class="slideshow-nav slideshow-next">›</button>
+    </div>
+    
+    <div class="slideshow-controls">
+      <button id="slideshowPausePlayBtn" class="btn">⏸ Pause</button>
+      <button id="slideshowSpeedDecBtn" class="btn btn-small">−</button>
+      <input type="range" id="slideshowSpeedSlider" min="1" max="25" value="2" class="speed-slider">
+      <button id="slideshowSpeedIncBtn" class="btn btn-small">+</button>
+      <span id="slideshowSpeedDisplay" class="speed-display">2s</span>
+      <button id="slideshowDeleteBtn" class="btn btn-danger">🗑 Delete</button>
+      <span id="slideshowCounter" class="slideshow-counter">1 / 1</span>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/app.js"></script>
+  <script src="/js/gallery.js"></script>
+  <script src="/js/slideshow.js"></script>
 </body>
 </html>

@@ -1,187 +1,352 @@
-'use strict'
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const mime = require('mime-types');
+const fs = require('fs').promises;
+const path = require('path');
 
-const express = require('express')
-const cors = require('cors')
-const morgan = require('morgan')
-const path = require('path')
-const fs = require('fs').promises
+const app = express();
+const PORT = process.env.PORT || 3001;
 
-const PORT = process.env.PORT || 3000
-const APP_ROOT = __dirname
-const DEFAULT_DIR = '/Volumes' // Start at /Volumes to access all mounted drives
-const ALLOWED_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
-
-// Validate and sanitize directory path
-function validateDirectory(dir) {
-  if (!dir) return null
-  const resolved = path.resolve(dir)
-  
-  // Basic security: prevent path traversal attacks
-  // Allow access to all mounted volumes including /Volumes
-  if (resolved.includes('..')) return null
-  
-  // Check if directory exists and is readable
-  try {
-    const stat = require('fs').statSync(resolved)
-    if (!stat.isDirectory()) return null
-    return resolved
-  } catch (err) {
-    return null
-  }
-}
-
-/**
- * ImageService class handles all file operations for images
- * Provides secure methods to list, validate, and delete images
- */
-class ImageService {
-  /**
-   * List all allowed image files from directory sorted by modification time (newest first)
-   * @param {string} dir - Directory path
-   * @returns {Promise<string[]>} Array of image filenames
-   */
-  static async listImages(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true })
-    const out = []
-    
-    for (const entry of entries) {
-      if (!entry.isFile()) continue
-      
-      const ext = path.extname(entry.name).toLowerCase()
-      if (!ALLOWED_EXT.has(ext)) continue
-      
-      const stat = await fs.stat(path.join(dir, entry.name))
-      out.push({ name: entry.name, mtimeMs: stat.mtimeMs })
-    }
-    
-    // Sort by modification time, newest first
-    out.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    return out.map(x => x.name)
-  }
-
-  /**
-   * Validate filename to prevent path traversal and ensure allowed extension
-   * @param {string} name - Filename to validate
-   * @returns {boolean} True if filename is safe and allowed
-   */
-  static isAllowedFilename(name) {
-    if (!name || name.includes('/') || name.includes('\\')) return false
-    const ext = path.extname(name).toLowerCase()
-    return ALLOWED_EXT.has(ext)
-  }
-
-  /**
-   * Delete an image file after validation
-   * @param {string} dir - Directory path  
-   * @param {string} name - Filename to delete
-   * @throws {Error} If filename is invalid
-   */
-  static async delete(dir, name) {
-    if (!this.isAllowedFilename(name)) {
-      throw new Error('Invalid filename')
-    }
-    await fs.unlink(path.join(dir, name))
-  }
-}
-
-// Initialize Express app
-const app = express()
+// Configuration
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_BASE_DIRS = process.env.ALLOWED_BASE_DIRS 
+  ? process.env.ALLOWED_BASE_DIRS.split(':') 
+  : null;
 
 // Middleware
-app.use(cors())
-app.use(morgan('dev'))
-app.use(express.static(path.join(APP_ROOT, 'public'), { maxAge: '1h' }))
+app.use(express.json({ limit: '1mb' }));
+app.use(cors());
+app.use(morgan('dev'));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Helper functions
 
 /**
- * GET /api/directories
- * Returns subdirectories of given path
+ * Encode file path to base64-url safe format
  */
-app.get('/api/directories', async (req, res) => {
+function encodePath(filePath) {
+  return Buffer.from(filePath).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+/**
+ * Decode base64-url safe format to file path
+ */
+function decodePath(encoded) {
   try {
-    const dir = req.query.dir || DEFAULT_DIR
-    const validated = validateDirectory(dir)
-    if (!validated) return res.status(400).json({ error: 'Invalid directory' })
+    const base64 = encoded
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
     
-    const entries = await fs.readdir(validated, { withFileTypes: true })
-    const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
-      .map(e => ({
-        name: e.name,
-        path: path.join(validated, e.name)
-      }))
+    const padding = (4 - (base64.length % 4)) % 4;
+    const padded = base64 + '='.repeat(padding);
     
-    res.json({ currentDir: validated, directories: dirs })
+    return Buffer.from(padded, 'base64').toString('utf8');
   } catch (err) {
-    console.error('Error listing directories:', err)
-    res.status(500).json({ error: 'Failed to list directories' })
+    throw new Error('Invalid encoded path');
   }
-})
+}
 
 /**
- * GET /api/images?dir=/path/to/dir
- * Returns a JSON array of all image files with their URLs from specified directory
+ * Validate that path is within allowed base directories (if configured)
  */
-app.get('/api/images', async (req, res) => {
-  try {
-    const dir = req.query.dir || DEFAULT_DIR
-    const validated = validateDirectory(dir)
-    if (!validated) return res.status(400).json({ error: 'Invalid directory' })
+async function validatePath(filePath) {
+  const resolvedPath = await fs.realpath(filePath).catch(() => filePath);
+  
+  if (ALLOWED_BASE_DIRS) {
+    const isAllowed = ALLOWED_BASE_DIRS.some(baseDir => 
+      resolvedPath.startsWith(path.resolve(baseDir))
+    );
     
-    const names = await ImageService.listImages(validated)
-    res.json({
-      directory: validated,
-      files: names.map(n => ({
-        name: n,
-        url: '/images/' + encodeURIComponent(n) + '?dir=' + encodeURIComponent(validated)
-      }))
-    })
-  } catch (err) {
-    console.error('Error listing images:', err)
-    res.status(500).json({ error: 'Failed to list images' })
-  }
-})
-
-/**
- * GET /images/:filename?dir=/path/to/dir
- * Serves individual image files
- */
-app.get('/images/:filename', (req, res) => {
-  const name = req.params.filename
-  const dir = req.query.dir || DEFAULT_DIR
-  const validated = validateDirectory(dir)
-  
-  if (!validated || !ImageService.isAllowedFilename(name)) {
-    return res.status(400).json({ error: 'Invalid filename or directory' })
-  }
-  
-  res.sendFile(path.join(validated, name), (err) => {
-    if (err) {
-      res.status(404).json({ error: 'File not found' })
+    if (!isAllowed) {
+      throw new Error('Path is outside allowed directories');
     }
-  })
-})
+  }
+  
+  return resolvedPath;
+}
 
 /**
- * DELETE /api/images/:filename?dir=/path/to/dir
- * Deletes an image file (no confirmation required)
+ * Check if file extension is allowed
  */
-app.delete('/api/images/:filename', async (req, res) => {
+function isAllowedExtension(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(ext);
+}
+
+/**
+ * Get file stats
+ */
+async function getFileStats(filePath) {
   try {
-    const dir = req.query.dir || DEFAULT_DIR
-    const validated = validateDirectory(dir)
-    if (!validated) return res.status(400).json({ error: 'Invalid directory' })
-    
-    await ImageService.delete(validated, req.params.filename)
-    res.json({ ok: true })
+    const stats = await fs.stat(filePath);
+    return {
+      name: path.basename(filePath),
+      ext: path.extname(filePath).toLowerCase(),
+      size: stats.size,
+      mtime: stats.mtime,
+      pathB64: encodePath(filePath)
+    };
   } catch (err) {
-    console.error('Error deleting file:', err)
-    res.status(400).json({ error: 'Delete failed' })
+    return null;
   }
-})
+}
+
+// API Routes
+
+/**
+ * Health check endpoint
+ */
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true });
+});
+
+/**
+ * Load directory and return list of images
+ */
+app.post('/api/load-directory', async (req, res) => {
+  try {
+    const { path: dirPath } = req.body;
+    
+    if (!dirPath) {
+      return res.status(400).json({ error: 'Directory path is required' });
+    }
+    
+    // Validate directory exists
+    let stats;
+    try {
+      stats = await fs.stat(dirPath);
+    } catch (err) {
+      return res.status(404).json({ error: 'Directory not found' });
+    }
+    
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Path is not a directory' });
+    }
+    
+    // Validate path is allowed
+    try {
+      await validatePath(dirPath);
+    } catch (err) {
+      return res.status(403).json({ error: err.message });
+    }
+    
+    // Read directory
+    const files = await fs.readdir(dirPath);
+    
+    // Filter and get stats for images
+    const imagePromises = files
+      .map(file => path.join(dirPath, file))
+      .filter(filePath => isAllowedExtension(filePath))
+      .map(filePath => getFileStats(filePath));
+    
+    const imageStats = await Promise.all(imagePromises);
+    const images = imageStats.filter(img => img !== null);
+    
+    res.json({
+      dir: dirPath,
+      images,
+      count: images.length
+    });
+    
+  } catch (err) {
+    console.error('Error loading directory:', err);
+    res.status(500).json({ error: 'Failed to load directory', message: err.message });
+  }
+});
+
+/**
+ * Serve an image file
+ */
+app.get('/api/image', async (req, res) => {
+  try {
+    const { path: encodedPath } = req.query;
+    
+    if (!encodedPath) {
+      return res.status(400).json({ error: 'Path parameter is required' });
+    }
+    
+    // Decode path
+    let filePath;
+    try {
+      filePath = decodePath(encodedPath);
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid path encoding' });
+    }
+    
+    // Validate extension
+    if (!isAllowedExtension(filePath)) {
+      return res.status(415).json({ error: 'Unsupported file type' });
+    }
+    
+    // Validate path
+    try {
+      await validatePath(filePath);
+    } catch (err) {
+      return res.status(403).json({ error: err.message });
+    }
+    
+    // Check file exists
+    try {
+      await fs.access(filePath);
+    } catch (err) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    
+    // Set headers to prevent caching
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    // Send file with correct content type
+    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
+    res.type(mimeType);
+    res.sendFile(path.resolve(filePath));
+    
+  } catch (err) {
+    console.error('Error serving image:', err);
+    res.status(500).json({ error: 'Failed to serve image', message: err.message });
+  }
+});
+
+/**
+ * Delete an image file
+ */
+app.delete('/api/delete-image', async (req, res) => {
+  try {
+    const { path: encodedPath } = req.body;
+    
+    if (!encodedPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    
+    // Decode path
+    let filePath;
+    try {
+      filePath = decodePath(encodedPath);
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid path encoding' });
+    }
+    
+    // Validate extension
+    if (!isAllowedExtension(filePath)) {
+      return res.status(415).json({ error: 'Unsupported file type' });
+    }
+    
+    // Validate path
+    try {
+      await validatePath(filePath);
+    } catch (err) {
+      return res.status(403).json({ error: err.message });
+    }
+    
+    // Check file exists
+    try {
+      await fs.access(filePath);
+    } catch (err) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    
+    // Delete file
+    await fs.unlink(filePath);
+    
+    res.json({ ok: true, pathB64: encodedPath });
+    
+  } catch (err) {
+    console.error('Error deleting image:', err);
+    res.status(500).json({ error: 'Failed to delete image', message: err.message });
+  }
+});
+
+/**
+ * List directories for browsing
+ */
+app.get('/api/list-directory', async (req, res) => {
+  try {
+    let dirPath = req.query.path ? decodePath(req.query.path) : '/';
+    
+    // Default to user home if root and ALLOWED_BASE_DIRS is set
+    if (dirPath === '/' && ALLOWED_BASE_DIRS && ALLOWED_BASE_DIRS.length > 0) {
+      dirPath = ALLOWED_BASE_DIRS[0];
+    }
+    
+    // Validate directory exists
+    let stats;
+    try {
+      stats = await fs.stat(dirPath);
+    } catch (err) {
+      return res.status(404).json({ error: 'Directory not found' });
+    }
+    
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Path is not a directory' });
+    }
+    
+    // Validate path is allowed
+    try {
+      await validatePath(dirPath);
+    } catch (err) {
+      return res.status(403).json({ error: err.message });
+    }
+    
+    // Read directory
+    const files = await fs.readdir(dirPath);
+    
+    // Get directories and count images
+    const entries = await Promise.all(
+      files.map(async (file) => {
+        const fullPath = path.join(dirPath, file);
+        try {
+          const stat = await fs.stat(fullPath);
+          return { name: file, fullPath, isDir: stat.isDirectory() };
+        } catch (err) {
+          return null;
+        }
+      })
+    );
+    
+    const dirs = entries
+      .filter(entry => entry && entry.isDir)
+      .map(entry => ({
+        name: entry.name,
+        pathB64: encodePath(entry.fullPath)
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    
+    const imageCount = entries.filter(entry => 
+      entry && !entry.isDir && isAllowedExtension(entry.fullPath)
+    ).length;
+    
+    // Get parent directory
+    const parent = path.dirname(dirPath);
+    const parentB64 = parent !== dirPath ? encodePath(parent) : null;
+    
+    res.json({
+      path: dirPath,
+      pathB64: encodePath(dirPath),
+      parent: parentB64,
+      dirs,
+      imageCount
+    });
+    
+  } catch (err) {
+    console.error('Error listing directory:', err);
+    res.status(500).json({ error: 'Failed to list directory', message: err.message });
+  }
+});
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`)
-  console.log(`Default directory: ${DEFAULT_DIR}`)
-  console.log(`Browse directories and select images to view`)
-})
+  console.log(`Image Gallery server running on port ${PORT}`);
+  console.log(`Allowed extensions: ${ALLOWED_EXTENSIONS.join(', ')}`);
+  if (ALLOWED_BASE_DIRS) {
+    console.log(`Allowed base directories: ${ALLOWED_BASE_DIRS.join(', ')}`);
+  } else {
+    console.log('No directory restrictions (all paths allowed)');
+  }
+});
