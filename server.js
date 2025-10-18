@@ -245,14 +245,7 @@ app.delete('/api/delete-image', async (req, res) => {
       return res.status(403).json({ error: err.message });
     }
     
-    // Check file exists
-    try {
-      await fs.access(filePath);
-    } catch (err) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-    
-    // Delete file
+    // Delete file directly (skip existence check for speed)
     await fs.unlink(filePath);
     
     res.json({ ok: true, pathB64: encodedPath });
@@ -260,6 +253,68 @@ app.delete('/api/delete-image', async (req, res) => {
   } catch (err) {
     console.error('Error deleting image:', err);
     res.status(500).json({ error: 'Failed to delete image', message: err.message });
+  }
+});
+
+/**
+ * Bulk delete images
+ */
+app.post('/api/delete-images-bulk', async (req, res) => {
+  try {
+    const { paths } = req.body;
+    
+    if (!paths || !Array.isArray(paths) || paths.length === 0) {
+      return res.status(400).json({ error: 'Paths array is required' });
+    }
+    
+    // Process all deletions
+    const results = await Promise.allSettled(
+      paths.map(async (encodedPath) => {
+        try {
+          const filePath = decodePath(encodedPath);
+          
+          // Validate extension and path
+          if (!isAllowedExtension(filePath)) {
+            throw new Error('Unsupported file type');
+          }
+          
+          await validatePath(filePath);
+          await fs.unlink(filePath);
+          
+          return { pathB64: encodedPath, success: true };
+        } catch (err) {
+          return { pathB64: encodedPath, success: false, error: err.message };
+        }
+      })
+    );
+    
+    const succeeded = [];
+    const failed = [];
+    
+    results.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        if (result.value.success) {
+          succeeded.push(result.value.pathB64);
+        } else {
+          failed.push(result.value);
+        }
+      } else {
+        failed.push({ error: result.reason.message });
+      }
+    });
+    
+    res.json({
+      ok: true,
+      succeeded,
+      failed,
+      total: paths.length,
+      successCount: succeeded.length,
+      failedCount: failed.length
+    });
+    
+  } catch (err) {
+    console.error('Error in bulk delete:', err);
+    res.status(500).json({ error: 'Failed to delete images', message: err.message });
   }
 });
 

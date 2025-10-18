@@ -58,6 +58,23 @@ class ApiClient {
     }
     return response.json();
   }
+
+  /**
+   * Bulk delete images
+   */
+  async deleteImagesBulk(pathsB64) {
+    const response = await fetch('/api/delete-images-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: pathsB64 })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete images');
+    }
+    return response.json();
+  }
 }
 
 /**

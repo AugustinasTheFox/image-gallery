@@ -280,8 +280,20 @@ class Gallery {
       this.images.splice(index, 1);
       this.selected.delete(image.pathB64);
       
-      // Update display
-      this.renderGrid();
+      // Remove tile from DOM directly (faster than full re-render)
+      const tile = this.gridEl.querySelector(`[data-index="${index}"]`);
+      if (tile) {
+        tile.remove();
+      }
+      
+      // Update remaining tiles' indices
+      const tiles = this.gridEl.querySelectorAll('.image-tile');
+      tiles.forEach((t, i) => {
+        if (i >= index) {
+          t.dataset.index = i;
+        }
+      });
+      
       this.updateImageCount();
       this.computeColumns();
       
@@ -299,38 +311,32 @@ class Gallery {
     
     const toDelete = Array.from(this.selected);
     
-    // Delete all concurrently
-    const results = await Promise.allSettled(
-      toDelete.map(pathB64 => window.appState.apiClient.deleteImage(pathB64))
-    );
-    
-    // Track which deletions succeeded
-    const succeeded = new Set();
-    results.forEach((result, i) => {
-      if (result.status === 'fulfilled') {
-        succeeded.add(toDelete[i]);
-      } else {
-        console.error('Failed to delete image:', toDelete[i], result.reason);
+    try {
+      // Use bulk delete API for better performance
+      const result = await window.appState.apiClient.deleteImagesBulk(toDelete);
+      
+      const succeeded = new Set(result.succeeded);
+      
+      // Remove successfully deleted images efficiently
+      this.images = this.images.filter(img => !succeeded.has(img.pathB64));
+      
+      // Update selection (keep failed deletions selected)
+      this.selected = new Set(
+        Array.from(this.selected).filter(pathB64 => !succeeded.has(pathB64))
+      );
+      
+      // Single render update
+      this.renderGrid();
+      this.updateImageCount();
+      this.computeColumns();
+      
+      // Show summary if there were failures
+      if (result.failedCount > 0) {
+        alert(`Deleted ${result.successCount} images. Failed to delete ${result.failedCount} images.`);
       }
-    });
-    
-    // Remove successfully deleted images
-    this.images = this.images.filter(img => !succeeded.has(img.pathB64));
-    
-    // Update selection (keep failed deletions selected)
-    this.selected = new Set(
-      Array.from(this.selected).filter(pathB64 => !succeeded.has(pathB64))
-    );
-    
-    // Update display
-    this.renderGrid();
-    this.updateImageCount();
-    this.computeColumns();
-    
-    // Show summary if there were failures
-    const failedCount = toDelete.length - succeeded.size;
-    if (failedCount > 0) {
-      alert(`Deleted ${succeeded.size} images. Failed to delete ${failedCount} images.`);
+    } catch (error) {
+      console.error('Failed to delete images:', error);
+      alert('Failed to delete images: ' + error.message);
     }
   }
 
