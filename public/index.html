@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Gallery</title>
+  <link rel="stylesheet" href="https://unpkg.com/photoswipe@5/dist/photoswipe.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Image Gallery</h1>
+    <div class="directory-browser">
+      <label>Directory:</label>
+      <input type="text" id="dirPath" placeholder="Enter directory path..." />
+      <button id="browseBtn" class="btn">Browse</button>
+      <button id="loadBtn" class="btn">Load</button>
+    </div>
+    <div class="controls">
+      <button id="play" class="btn">Play</button>
+      <div class="interval-control">
+        <label for="interval">Interval:</label>
+        <input type="range" id="interval" min="1" max="10" step="0.5" value="3">
+        <span id="intervalLabel">3.0s</span>
+      </div>
+      <div class="fit-control">
+        <label for="fitMode">Fit:</label>
+        <select id="fitMode" class="fit-select">
+          <option value="contain">Auto</option>
+          <option value="height" selected>Height</option>
+          <option value="width">Width</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="grid" class="grid"></div>
+  </main>
+
+  <div id="dirModal" class="modal" style="display:none">
+    <div class="modal-content">
+      <h2 id="modalTitle">Select Directory</h2>
+      <div id="dirList" class="dir-list"></div>
+      <button id="closeModal" class="btn">Close</button>
+    </div>
+  </div>
+
+  <script type="module" src="app.js?v=12"></script>
+</body>
+</html>
